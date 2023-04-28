@@ -2,6 +2,7 @@ package server
 
 import (
 	"archive/tar"
+	"bufio"
 	"compress/gzip"
 	"encoding/json"
 	"fmt"
@@ -44,12 +45,16 @@ func listRepoRefs(repo string) (refs []GitRef, err error) {
 	}
 
 	cmd := exec.Command("git", "ls-remote", repo)
-	out, err := cmd.Output()
+	reader, err := cmd.StdoutPipe()
 	if err != nil {
-		return nil, err
+		return
 	}
+	scanner := bufio.NewScanner(reader)
+	scanner.Split(bufio.ScanLines)
 	refs = []GitRef{}
-	for _, line := range strings.Split(string(out), "\n") {
+	cmd.Start()
+	for scanner.Scan() {
+		line := scanner.Text()
 		if line == "" {
 			continue
 		}
@@ -59,6 +64,8 @@ func listRepoRefs(repo string) (refs []GitRef, err error) {
 			Sha: sha,
 		})
 	}
+	reader.Close()
+	cmd.Wait()
 
 	if cache != nil {
 		cache.Set(cacheKey, utils.MustEncodeJSON(refs), 10*time.Minute)
@@ -79,6 +86,7 @@ func ghInstall(wd, name, hash string) (err error) {
 	if err != nil {
 		return
 	}
+	defer unziped.Close()
 
 	// extract tarball
 	tr := tar.NewReader(unziped)
@@ -92,6 +100,7 @@ func ghInstall(wd, name, hash string) (err error) {
 			return err
 		}
 		// strip tarball root dir
+
 		hname := strings.Join(strings.Split(h.Name, "/")[1:], "/")
 		if strings.HasPrefix(hname, ".") {
 			continue
